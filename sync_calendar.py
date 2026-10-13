@@ -60,7 +60,6 @@ def fetch_wp_excerpts():
     """Fetches live excerpts from WordPress REST API to override default summaries."""
     excerpts = {}
     try:
-        # Increase per_page or query posts directly
         response = requests.get(f"{WP_API_URL}?per_page=100", timeout=10)
         if response.status_code == 200:
             posts = response.json()
@@ -68,20 +67,17 @@ def fetch_wp_excerpts():
                 slug = post.get("slug")
                 raw_excerpt = post.get("excerpt", {}).get("rendered", "")
                 
-                # Strip HTML tags (<p>, </p>, <a>, etc.)
+                # Strip HTML tags and unescape entities
                 clean_text = re.sub(r'<[^>]+>', '', raw_excerpt)
-                # Unescape HTML entities (&nbsp;, &#8217;, etc.)
                 clean_text = html.unescape(clean_text).strip()
                 
                 if slug and clean_text:
                     excerpts[slug] = clean_text
-                    print(f"✅ Successfully fetched WP excerpt for slug: {slug}")
-        else:
-            print(f"⚠️ WordPress API returned status code: {response.status_code}")
+                    print(f"✅ Loaded WP excerpt for: {slug}")
     except Exception as e:
-        print(f"⚠️ WordPress API fetch error: {e}")
+        print(f"⚠️ WP API Error: {e}")
     return excerpts
-
+    
 def get_calendar_service():
     creds = Credentials(
         token=None,
