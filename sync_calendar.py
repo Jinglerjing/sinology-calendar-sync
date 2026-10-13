@@ -3,6 +3,7 @@ import time
 import re
 import requests
 import html
+import hashlib
 from datetime import date, timedelta
 from lunar_python import Solar
 from google.oauth2.credentials import Credentials
@@ -50,11 +51,11 @@ FESTIVALS_DATA = {
     "腊八节": {"translation": "Laba Festival", "slug": "laba-festival", "summary": "A traditional winter day marking the prelude to Chinese New Year.", "rituals": "Laba porridge (腊八粥), pickling Laba green garlic."}
 }
 
+
 def clean_id(raw_id):
-    """Google Calendar API requires event IDs to contain lowercase alphanumeric characters (a-z, 0-9)."""
-    cleaned = raw_id.lower()
-    cleaned = re.sub(r'[^a-z0-9]', '', cleaned)
-    return cleaned[:102]
+    """Generates a valid, deterministic Google Calendar Base32-compliant ID."""
+    # MD5 hex digest contains only 0-9 and a-f (which fits Google's a-v requirement perfectly)
+    return "evt" + hashlib.md5(raw_id.encode('utf-8')).hexdigest()
 
 def fetch_wp_excerpts():
     """Fetches live excerpts from WordPress REST API to override default summaries."""
