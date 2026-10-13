@@ -1,5 +1,6 @@
 import os
 import time
+import re
 import requests
 from datetime import date, timedelta
 from lunar_python import Solar
@@ -48,6 +49,12 @@ FESTIVALS_DATA = {
     "腊八节": {"translation": "Laba Festival", "slug": "laba-festival", "summary": "A traditional winter day marking the prelude to Chinese New Year.", "rituals": "Laba porridge (腊八粥), pickling Laba green garlic."}
 }
 
+def clean_id(raw_id):
+    """Google Calendar API requires event IDs to contain only characters a-v and 0-9."""
+    cleaned = raw_id.lower()
+    cleaned = re.sub(f'[^a-v0-9]', '', cleaned)
+    return cleaned[:102]  # Max 102 characters
+
 def fetch_wp_excerpts():
     """Fetches live excerpts from WordPress REST API to override default summaries."""
     excerpts = {}
@@ -77,7 +84,7 @@ def get_calendar_service():
     return build("calendar", "v3", credentials=creds)
 
 def fetch_existing_events(service, calendar_id):
-    """Smart Diffing: Fetches existing calendar events to prevent unnecessary API writes."""
+    """Smart Diffing: Fetches existing calendar events."""
     existing = {}
     page_token = None
     while True:
@@ -95,27 +102,25 @@ def fetch_existing_events(service, calendar_id):
     return existing
 
 def safe_upsert_event(service, calendar_id, event_body, is_existing, max_retries=5):
-    """Inserts or updates an event with backoff retries and rate-limiting delays."""
+    """Inserts or updates an event with backoff retries."""
     for attempt in range(max_retries):
         try:
             if is_existing:
                 service.events().update(calendarId=calendar_id, eventId=event_body['id'], body=event_body).execute()
             else:
                 service.events().insert(calendarId=calendar_id, body=event_body).execute()
-            
-            time.sleep(0.5)  # Pace requests to respect Google Calendar rate limits
+            time.sleep(0.3)
             return
         except HttpError as e:
             if e.resp.status in [500, 502, 503, 504] and attempt < max_retries - 1:
                 wait_time = (2 ** attempt) + 1
-                print(f"⚠️ Google API {e.resp.status} Backend Error. Retrying in {wait_time}s...")
+                print(f"⚠️ Google API {e.resp.status} Error. Retrying in {wait_time}s...")
                 time.sleep(wait_time)
             else:
                 print(f"❌ Failed to sync event {event_body.get('summary')}: {e}")
                 raise e
 
 def is_changed(existing, target):
-    """Returns True if the event needs to be updated in Google Calendar."""
     if not existing:
         return True
     return (
@@ -135,6 +140,7 @@ def main():
     skipped_count = 0
     updated_count = 0
 
+    # TESTING MODE: Set to 2026 to verify fast sync (Change to range(2026, 2031) when ready)
     for year in range(2026, 2031):
         start_date = date(year, 1, 1)
         end_date = date(year, 12, 31)
@@ -154,7 +160,8 @@ def main():
                 slug = info['slug']
                 summary_text = wp_excerpts.get(slug, info['summary'])
                 
-                uid = f"solar-term-{year}-{slug}@sinologystudio.com".replace("@", "-at-").replace(".", "-dot-")
+                # Base32 safe ID
+                uid = clean_id(f"solarterm{year}{slug}")
                 desc = f"{info['translation']} · {jieqi}\n\n{summary_text}\n\n🌿 Seasonal Rituals: {info['rituals']}\n\n📖 Read Full Seasonal Guide & Printable Postcard:\n{BASE_URL}/{slug}/"
                 
                 event_body = {
@@ -180,7 +187,8 @@ def main():
                     slug = info['slug']
                     summary_text = wp_excerpts.get(slug, info['summary'])
                     
-                    uid = f"festival-{year}-{slug}@sinologystudio.com".replace("@", "-at-").replace(".", "-dot-")
+                    # Base32 safe ID
+                    uid = clean_id(f"festival{year}{slug}")
                     desc = f"{info['translation']} · {fest}\n\n{summary_text}\n\n🧧 Traditions & Foods: {info['rituals']}\n\n📖 Read Cultural Guide:\n{BASE_URL}/{slug}/"
                     
                     event_body = {
