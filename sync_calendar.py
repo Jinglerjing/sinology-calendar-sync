@@ -136,6 +136,27 @@ def is_changed(existing, target):
         existing["end"] != target["end"]["date"]
     )
 
+def clear_legacy_events(service, calendar_id):
+    """Deletes old events created before the ID sanitization update."""
+    page_token = None
+    deleted_count = 0
+    while True:
+        events_result = service.events().list(calendarId=calendar_id, pageToken=page_token).execute()
+        for item in events_result.get('items', []):
+            event_id = item.get('id', '')
+            # Legacy IDs contain hyphens or non-alphanumeric characters
+            if '-' in event_id or '@' in event_id or '_dot_' in event_id:
+                try:
+                    service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
+                    deleted_count += 1
+                    time.sleep(0.1)
+                except Exception as e:
+                    print(f"⚠️ Could not delete legacy event {event_id}: {e}")
+        page_token = events_result.get('nextPageToken')
+        if not page_token:
+            break
+    print(f"🧹 Cleaned up {deleted_count} legacy duplicate events.")
+
 def main():
     service = get_calendar_service()
     calendar_id = os.environ["CALENDAR_ID"]
