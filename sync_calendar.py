@@ -160,6 +160,9 @@ def clear_legacy_events(service, calendar_id):
 def main():
     service = get_calendar_service()
     calendar_id = os.environ["CALENDAR_ID"]
+
+    # Run legacy event cleanup
+    clear_legacy_events(service, calendar_id)
     
     wp_excerpts = fetch_wp_excerpts()
     existing_events = fetch_existing_events(service, calendar_id)
