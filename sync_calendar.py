@@ -51,10 +51,10 @@ FESTIVALS_DATA = {
 }
 
 def clean_id(raw_id):
-    """Google Calendar API requires event IDs to contain only characters a-v and 0-9."""
+    """Google Calendar API requires event IDs to contain lowercase alphanumeric characters (a-z, 0-9)."""
     cleaned = raw_id.lower()
-    cleaned = re.sub(f'[^a-v0-9]', '', cleaned)
-    return cleaned[:102]  # Max 102 characters
+    cleaned = re.sub(r'[^a-z0-9]', '', cleaned)
+    return cleaned[:102]
 
 def fetch_wp_excerpts():
     """Fetches live excerpts from WordPress REST API to override default summaries."""
@@ -202,6 +202,7 @@ def main():
                     "end": {"date": next_day.isoformat()}
                 }
 
+                
                 if is_changed(existing_events.get(uid), event_body):
                     is_existing = uid in existing_events
                     safe_upsert_event(service, calendar_id, event_body, is_existing)
