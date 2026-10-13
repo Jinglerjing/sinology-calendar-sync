@@ -58,7 +58,6 @@ def fetch_wp_excerpts():
             for post in posts:
                 slug = post.get("slug")
                 excerpt = post.get("excerpt", {}).get("rendered", "")
-                # Clean HTML tags from excerpt text
                 clean_excerpt = requests.utils.unquote(excerpt).replace("<p>", "").replace("</p>", "").strip()
                 if slug and clean_excerpt:
                     excerpts[slug] = clean_excerpt
