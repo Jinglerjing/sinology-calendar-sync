@@ -94,20 +94,24 @@ def fetch_existing_events(service, calendar_id):
             break
     return existing
 
-def safe_import_event(service, calendar_id, event_body, max_retries=5):
-    """Imports an event with automatic retry and exponential backoff for 500/503 errors."""
+def safe_upsert_event(service, calendar_id, event_body, is_existing, max_retries=5):
+    """Inserts or updates an event with backoff retries and rate-limiting delays."""
     for attempt in range(max_retries):
         try:
-            service.events().import_(calendarId=calendar_id, body=event_body).execute()
-            time.sleep(0.1)  # Gentle delay to avoid Google API rate limits
+            if is_existing:
+                service.events().update(calendarId=calendar_id, eventId=event_body['id'], body=event_body).execute()
+            else:
+                service.events().insert(calendarId=calendar_id, body=event_body).execute()
+            
+            time.sleep(0.5)  # Pace requests to respect Google Calendar rate limits
             return
         except HttpError as e:
             if e.resp.status in [500, 502, 503, 504] and attempt < max_retries - 1:
-                wait_time = (2 ** attempt)
+                wait_time = (2 ** attempt) + 1
                 print(f"⚠️ Google API {e.resp.status} Backend Error. Retrying in {wait_time}s...")
                 time.sleep(wait_time)
             else:
-                print(f"❌ Failed to import event {event_body.get('summary')}: {e}")
+                print(f"❌ Failed to sync event {event_body.get('summary')}: {e}")
                 raise e
 
 def is_changed(existing, target):
@@ -162,7 +166,8 @@ def main():
                 }
 
                 if is_changed(existing_events.get(uid), event_body):
-                    safe_import_event(service, calendar_id, event_body)
+                    is_existing = uid in existing_events
+                    safe_upsert_event(service, calendar_id, event_body, is_existing)
                     updated_count += 1
                 else:
                     skipped_count += 1
@@ -187,7 +192,8 @@ def main():
                     }
 
                     if is_changed(existing_events.get(uid), event_body):
-                        safe_import_event(service, calendar_id, event_body)
+                        is_existing = uid in existing_events
+                        safe_upsert_event(service, calendar_id, event_body, is_existing)
                         updated_count += 1
                     else:
                         skipped_count += 1
