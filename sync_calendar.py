@@ -108,23 +108,37 @@ def fetch_existing_events(service, calendar_id):
             break
     return existing
 
-def safe_upsert_event(service, calendar_id, event_body, is_existing, max_retries=5):
-    """Inserts or updates an event with backoff retries."""
+def safe_upsert_event(service, calendar_id, event_body, max_retries=5):
+    """Safely upserts an event by attempting update first, falling back to insert."""
     for attempt in range(max_retries):
         try:
-            if is_existing:
-                service.events().update(calendarId=calendar_id, eventId=event_body['id'], body=event_body).execute()
-            else:
-                service.events().insert(calendarId=calendar_id, body=event_body).execute()
-            time.sleep(0.3)
+            # Try to update the event directly using its deterministic ID
+            service.events().update(
+                calendarId=calendar_id, 
+                eventId=event_body['id'], 
+                body=event_body
+            ).execute()
+            time.sleep(0.2)
             return
         except HttpError as e:
-            if e.resp.status in [500, 502, 503, 504] and attempt < max_retries - 1:
+            if e.resp.status == 404:
+                # Event doesn't exist yet in Google Calendar, insert it!
+                try:
+                    service.events().insert(
+                        calendarId=calendar_id, 
+                        body=event_body
+                    ).execute()
+                    time.sleep(0.2)
+                    return
+                except HttpError as insert_err:
+                    if insert_err.resp.status in [500, 502, 503, 504] and attempt < max_retries - 1:
+                        time.sleep((2 ** attempt) + 1)
+                        continue
+                    raise insert_err
+            elif e.resp.status in [500, 502, 503, 504] and attempt < max_retries - 1:
                 wait_time = (2 ** attempt) + 1
-                print(f"⚠️ Google API {e.resp.status} Error. Retrying in {wait_time}s...")
                 time.sleep(wait_time)
             else:
-                print(f"❌ Failed to sync event {event_body.get('summary')}: {e}")
                 raise e
 
 def is_changed(existing, target):
