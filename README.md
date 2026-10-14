@@ -1,7 +1,7 @@
 
 # Sinology Calendar to Google Calendar Sync
 
-An automated, maintenance-free Python pipeline that dynamically synchronizes traditional Chinese solar terms (*Jieqi*) and cultural festivals from WordPress to a dedicated Google Calendar.
+An automated, maintenance-free Python pipeline that dynamically synchronizes traditional Chinese solar terms (*Jieqi*) and cultural festivals from WordPress to a dedicated Google Calendar(aka a Lunisolar Calendar). 
 
 Designed to power the interactive calendar widget on [Sinology Studio](https://sinologystudio.com/rhythm), this repository runs on GitHub Actions to ensure seamless, evergreen updates.
 
