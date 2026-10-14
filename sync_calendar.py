@@ -51,10 +51,8 @@ FESTIVALS_DATA = {
     "腊八节": {"translation": "Laba Festival", "slug": "laba-festival", "summary": "A traditional winter day marking the prelude to Chinese New Year.", "rituals": "Laba porridge (腊八粥), pickling Laba green garlic."}
 }
 
-
 def clean_id(raw_id):
-    """Generates a valid, deterministic Google Calendar Base32-compliant ID."""
-    # MD5 hex digest contains only 0-9 and a-f (which fits Google's a-v requirement perfectly)
+    """Generates a valid, deterministic Google Calendar Base32 ID starting with 'evt'."""
     return "evt" + hashlib.md5(raw_id.encode('utf-8')).hexdigest()
 
 def fetch_wp_excerpts():
@@ -67,18 +65,15 @@ def fetch_wp_excerpts():
             for post in posts:
                 slug = post.get("slug")
                 raw_excerpt = post.get("excerpt", {}).get("rendered", "")
-                
-                # Strip HTML tags and unescape entities
                 clean_text = re.sub(r'<[^>]+>', '', raw_excerpt)
                 clean_text = html.unescape(clean_text).strip()
-                
                 if slug and clean_text:
                     excerpts[slug] = clean_text
                     print(f"✅ Loaded WP excerpt for: {slug}")
     except Exception as e:
         print(f"⚠️ WP API Error: {e}")
     return excerpts
-    
+
 def get_calendar_service():
     creds = Credentials(
         token=None,
@@ -91,7 +86,7 @@ def get_calendar_service():
     return build("calendar", "v3", credentials=creds)
 
 def fetch_existing_events(service, calendar_id):
-    """Smart Diffing: Fetches existing calendar events."""
+    """Fetches existing calendar events."""
     existing = {}
     page_token = None
     while True:
@@ -108,11 +103,31 @@ def fetch_existing_events(service, calendar_id):
             break
     return existing
 
+def clear_non_md5_events(service, calendar_id):
+    """Deletes all legacy events that do not start with our deterministic 'evt' MD5 prefix."""
+    page_token = None
+    deleted_count = 0
+    while True:
+        events_result = service.events().list(calendarId=calendar_id, pageToken=page_token).execute()
+        for item in events_result.get('items', []):
+            event_id = item.get('id', '')
+            if not event_id.startswith('evt'):
+                try:
+                    service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
+                    deleted_count += 1
+                    time.sleep(0.1)
+                except Exception as e:
+                    print(f"⚠️ Could not delete legacy event {event_id}: {e}")
+        page_token = events_result.get('nextPageToken')
+        if not page_token:
+            break
+    if deleted_count > 0:
+        print(f"🧹 Successfully deleted {deleted_count} legacy events from calendar.")
+
 def safe_upsert_event(service, calendar_id, event_body, max_retries=5):
-    """Safely upserts an event by attempting update first, falling back to insert."""
+    """Safely updates an existing MD5 event or inserts if new."""
     for attempt in range(max_retries):
         try:
-            # Try to update the event directly using its deterministic ID
             service.events().update(
                 calendarId=calendar_id, 
                 eventId=event_body['id'], 
@@ -122,7 +137,6 @@ def safe_upsert_event(service, calendar_id, event_body, max_retries=5):
             return
         except HttpError as e:
             if e.resp.status == 404:
-                # Event doesn't exist yet in Google Calendar, insert it!
                 try:
                     service.events().insert(
                         calendarId=calendar_id, 
@@ -151,33 +165,12 @@ def is_changed(existing, target):
         existing["end"] != target["end"]["date"]
     )
 
-def clear_legacy_events(service, calendar_id):
-    """Deletes old events created before the ID sanitization update."""
-    page_token = None
-    deleted_count = 0
-    while True:
-        events_result = service.events().list(calendarId=calendar_id, pageToken=page_token).execute()
-        for item in events_result.get('items', []):
-            event_id = item.get('id', '')
-            # Legacy IDs contain hyphens or non-alphanumeric characters
-            if '-' in event_id or '@' in event_id or '_dot_' in event_id:
-                try:
-                    service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
-                    deleted_count += 1
-                    time.sleep(0.1)
-                except Exception as e:
-                    print(f"⚠️ Could not delete legacy event {event_id}: {e}")
-        page_token = events_result.get('nextPageToken')
-        if not page_token:
-            break
-    print(f"🧹 Cleaned up {deleted_count} legacy duplicate events.")
-
 def main():
     service = get_calendar_service()
     calendar_id = os.environ["CALENDAR_ID"]
 
-    # Run legacy event cleanup
-    clear_legacy_events(service, calendar_id)
+    # Delete any lingering legacy events created under old ID schemes
+    clear_non_md5_events(service, calendar_id)
     
     wp_excerpts = fetch_wp_excerpts()
     existing_events = fetch_existing_events(service, calendar_id)
@@ -185,7 +178,6 @@ def main():
     skipped_count = 0
     updated_count = 0
 
-    # TESTING MODE: Set to 2026 to verify fast sync (Change to range(2026, 2031) when ready)
     for year in range(2026, 2031):
         start_date = date(year, 1, 1)
         end_date = date(year, 12, 31)
@@ -205,7 +197,6 @@ def main():
                 slug = info['slug']
                 summary_text = wp_excerpts.get(slug, info['summary'])
                 
-                # Base32 safe ID
                 uid = clean_id(f"solarterm{year}{slug}")
                 desc = f"{info['translation']} · {jieqi}\n\n{summary_text}\n\n🌿 Seasonal Rituals: {info['rituals']}\n\n📖 Read Full Seasonal Guide & Printable Postcard:\n{BASE_URL}/{slug}/"
                 
@@ -217,10 +208,8 @@ def main():
                     "end": {"date": next_day.isoformat()}
                 }
 
-                
                 if is_changed(existing_events.get(uid), event_body):
-                    is_existing = uid in existing_events
-                    safe_upsert_event(service, calendar_id, event_body, is_existing)
+                    safe_upsert_event(service, calendar_id, event_body)
                     updated_count += 1
                 else:
                     skipped_count += 1
@@ -233,7 +222,6 @@ def main():
                     slug = info['slug']
                     summary_text = wp_excerpts.get(slug, info['summary'])
                     
-                    # Base32 safe ID
                     uid = clean_id(f"festival{year}{slug}")
                     desc = f"{info['translation']} · {fest}\n\n{summary_text}\n\n🧧 Traditions & Foods: {info['rituals']}\n\n📖 Read Cultural Guide:\n{BASE_URL}/{slug}/"
                     
@@ -246,8 +234,7 @@ def main():
                     }
 
                     if is_changed(existing_events.get(uid), event_body):
-                        is_existing = uid in existing_events
-                        safe_upsert_event(service, calendar_id, event_body, is_existing)
+                        safe_upsert_event(service, calendar_id, event_body)
                         updated_count += 1
                     else:
                         skipped_count += 1
