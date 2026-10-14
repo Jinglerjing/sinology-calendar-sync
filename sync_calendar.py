@@ -56,7 +56,7 @@ def clean_id(raw_id):
     return "evt" + hashlib.md5(raw_id.encode('utf-8')).hexdigest()
 
 def fetch_wp_excerpts():
-    """Fetches live excerpts from WordPress REST API to override default summaries."""
+    """Fetches up to 100 live post excerpts from WordPress REST API."""
     excerpts = {}
     try:
         response = requests.get(f"{WP_API_URL}?per_page=100", timeout=10)
@@ -65,8 +65,10 @@ def fetch_wp_excerpts():
             for post in posts:
                 slug = post.get("slug")
                 raw_excerpt = post.get("excerpt", {}).get("rendered", "")
+                
                 clean_text = re.sub(r'<[^>]+>', '', raw_excerpt)
                 clean_text = html.unescape(clean_text).strip()
+                
                 if slug and clean_text:
                     excerpts[slug] = clean_text
                     print(f"✅ Loaded WP excerpt for: {slug}")
@@ -104,7 +106,7 @@ def fetch_existing_events(service, calendar_id):
     return existing
 
 def clear_non_md5_events(service, calendar_id):
-    """Deletes all legacy events that do not start with our deterministic 'evt' MD5 prefix."""
+    """Deletes legacy events that do not start with 'evt'."""
     page_token = None
     deleted_count = 0
     while True:
@@ -169,7 +171,6 @@ def main():
     service = get_calendar_service()
     calendar_id = os.environ["CALENDAR_ID"]
 
-    # Delete any lingering legacy events created under old ID schemes
     clear_non_md5_events(service, calendar_id)
     
     wp_excerpts = fetch_wp_excerpts()
@@ -195,10 +196,30 @@ def main():
             if jieqi in SOLAR_TERMS_DATA:
                 info = SOLAR_TERMS_DATA[jieqi]
                 slug = info['slug']
+                
+                # Fetch Rhythm Summary (Fallback to dict summary)
                 summary_text = wp_excerpts.get(slug, info['summary'])
                 
+                # Strategy 1: Living/Rituals Fallback Chain
+                # Check [slug]-living-[year] -> [slug]-living -> hardcoded dict
+                year_living_slug = f"{slug}-living-{year}"
+                generic_living_slug = f"{slug}-living"
+                rituals_text = wp_excerpts.get(
+                    year_living_slug, 
+                    wp_excerpts.get(generic_living_slug, info['rituals'])
+                )
+                
                 uid = clean_id(f"solarterm{year}{slug}")
-                desc = f"{info['translation']} · {jieqi}\n\n{summary_text}\n\n🌿 Seasonal Rituals: {info['rituals']}\n\n📖 Read Full Seasonal Guide & Printable Postcard:\n{BASE_URL}/{slug}/"
+                link_url = f"{BASE_URL}/{slug}/"
+                
+                # HTML link formatting ensures clickable URL on embedded widgets!
+                desc = (
+                    f"{info['translation']} · {jieqi}\n\n"
+                    f"{summary_text}\n\n"
+                    f"🌿 Seasonal Rituals: {rituals_text}\n\n"
+                    f"📖 Read Full Seasonal Guide & Printable Postcard:\n"
+                    f'<a href="{link_url}" target="_blank">{link_url}</a>'
+                )
                 
                 event_body = {
                     "id": uid,
@@ -220,10 +241,28 @@ def main():
                 if fest in FESTIVALS_DATA and fest not in added_festivals_this_year:
                     info = FESTIVALS_DATA[fest]
                     slug = info['slug']
+                    
+                    # Fetch Festival Summary (Fallback to dict summary)
                     summary_text = wp_excerpts.get(slug, info['summary'])
                     
+                    # Strategy 1: Festival Living Fallback Chain
+                    year_living_slug = f"{slug}-living-{year}"
+                    generic_living_slug = f"{slug}-living"
+                    rituals_text = wp_excerpts.get(
+                        year_living_slug, 
+                        wp_excerpts.get(generic_living_slug, info['rituals'])
+                    )
+                    
                     uid = clean_id(f"festival{year}{slug}")
-                    desc = f"{info['translation']} · {fest}\n\n{summary_text}\n\n🧧 Traditions & Foods: {info['rituals']}\n\n📖 Read Cultural Guide:\n{BASE_URL}/{slug}/"
+                    link_url = f"{BASE_URL}/{slug}/"
+                    
+                    desc = (
+                        f"{info['translation']} · {fest}\n\n"
+                        f"{summary_text}\n\n"
+                        f"🧧 Traditions & Foods: {rituals_text}\n\n"
+                        f"📖 Read Cultural Guide:\n"
+                        f'<a href="{link_url}" target="_blank">{link_url}</a>'
+                    )
                     
                     event_body = {
                         "id": uid,
